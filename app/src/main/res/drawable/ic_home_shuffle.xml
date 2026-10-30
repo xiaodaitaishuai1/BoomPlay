@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="@dimen/home_icon_size"
+    android:height="@dimen/home_icon_size"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@color/transparent"
+        android:pathData="M3,6h1c5.5,0 10.5,12 16,12h1M3,18h1c2.1,0 4.12,-1.75 6.12,-3.94M13.88,9.94C15.88,7.75 17.9,6 20,6h1M18,3l3,3 -3,3M18,15l3,3 -3,3"
+        android:strokeColor="@color/text_primary"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="1.69" />
+</vector>
