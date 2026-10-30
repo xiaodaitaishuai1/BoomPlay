@@ -1,0 +1,7 @@
+// Copy to app-config.gradle and supply the credentials for your local keystore.
+ext {
+    STORE_PATH = "../boomplay.jks"
+    STORE_PASSWORD = "CHANGE_ME"
+    KEY_ALIAS = "boomplay"
+    KEY_PASSWORD = "CHANGE_ME"
+}

@@ -6,6 +6,8 @@ Native Android music browser and player using the Boomplay API and Audiory B-sty
 
 Use JDK 21 and an Android SDK containing API 36. Set `JAVA_HOME` to the JDK and either set `ANDROID_HOME` or create an untracked `local.properties` containing `sdk.dir`.
 
+Debug and Release share the independent `boomplay.jks` signing key. Local credentials live in `app-config.gradle`; both files are ignored by Git. On another machine, restore these two files from your backup, or copy `app-config.gradle.example` and configure your own keystore. Keep the same key to publish updates to an existing installation.
+
 ```powershell
 .\gradlew.bat assembleDebug
 .\gradlew.bat testDebugUnitTest lintDebug

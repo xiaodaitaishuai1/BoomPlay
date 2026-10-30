@@ -3,6 +3,7 @@
 **/build/
 local.properties
 *.jks
+app-config.gradle
 .idea/
 .worktrees/
 docs/

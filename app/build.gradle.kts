@@ -2,6 +2,13 @@ plugins {
     id("com.android.application")
     id("com.google.devtools.ksp")
 }
+apply(from = "../app-config.gradle")
+
+val STORE_PATH: String by project.extra
+val STORE_PASSWORD: String by project.extra
+val KEY_ALIAS: String by project.extra
+val KEY_PASSWORD: String by project.extra
+
 android {
     namespace = "com.boomplay.musicplayer"
     compileSdk = 36
@@ -12,6 +19,18 @@ android {
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    signingConfigs {
+        create("release") {
+            storeFile = file(STORE_PATH)
+            storePassword = STORE_PASSWORD
+            keyAlias = KEY_ALIAS
+            keyPassword = KEY_PASSWORD
+        }
+    }
+    buildTypes {
+        getByName("debug") { signingConfig = signingConfigs.getByName("release") }
+        getByName("release") { signingConfig = signingConfigs.getByName("release") }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
