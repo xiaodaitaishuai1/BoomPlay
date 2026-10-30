@@ -1,15 +1,16 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <application android:name=".BoomPlayApplication" android:theme="@style/Theme.BoomPlay" android:label="@string/app_name" android:icon="@drawable/ic_app" android:allowBackup="false" android:supportsRtl="true">
+    <application android:name=".BoomPlayApplication" android:theme="@style/Theme.BoomPlay" android:label="@string/app_name" android:icon="@drawable/ic_app" android:allowBackup="false" android:fullBackupContent="@xml/backup_rules" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="true">
         <activity android:name=".PlayerActivity" android:exported="false" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity>
-        <service android:name=".playback.PlaybackService" android:exported="true" android:foregroundServiceType="mediaPlayback">
+        <!-- Media3 needs an exported session for system controls; onConnect validates controllers. -->
+        <service android:name=".playback.PlaybackService" android:exported="true" android:foregroundServiceType="mediaPlayback" tools:ignore="ExportedService">
             <intent-filter><action android:name="androidx.media3.session.MediaSessionService" /></intent-filter>
         </service>
     </application>

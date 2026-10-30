@@ -1,12 +1,98 @@
 package com.boomplay.musicplayer.library
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.*
 import org.junit.Test
 
 class MusicRepositoryTest {
+    @Test fun `concurrent business requests share one successful configuration`() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("{}").setBodyDelay(100, java.util.concurrent.TimeUnit.MILLISECONDS))
+            repeat(20) { server.enqueue(MockResponse().setBody("{}")) }
+            val repository = MusicRepository(MusicRepository.createApi(server.url("/").toString()))
+            kotlinx.coroutines.coroutineScope {
+                (1..20).map { async { repository.home() } }.forEach { it.await() }
+            }
+            assertEquals(21, server.requestCount)
+            val requests = (1..21).map { server.takeRequest().requestUrl!!.encodedPath }
+            assertEquals(1, requests.count { it.endsWith("startup1") })
+        }
+    }
+
+    @Test fun `cancelled configuration can be retried immediately`() = runBlocking {
+        var calls = 0
+        val api = object : BoomplayApi {
+            override suspend fun startup(): com.google.gson.JsonObject {
+                calls++
+                if (calls == 1) throw kotlinx.coroutines.CancellationException("cancelled")
+                return com.google.gson.JsonObject()
+            }
+            override suspend fun home(parameters: Map<String, String>) = com.google.gson.JsonObject()
+            override suspend fun collections(parameters: Map<String, String>) = com.google.gson.JsonObject()
+            override suspend fun detail(parameters: Map<String, String>) = com.google.gson.JsonObject()
+            override suspend fun artistSongs(parameters: Map<String, String>) = com.google.gson.JsonObject()
+            override suspend fun search(parameters: Map<String, String>) = com.google.gson.JsonObject()
+            override suspend fun track(id: Long) = com.google.gson.JsonObject()
+        }
+        val repository = MusicRepository(api)
+        try { repository.home(); fail("Cancellation swallowed") } catch (_: kotlinx.coroutines.CancellationException) { }
+        repository.home()
+        assertEquals(2, calls)
+    }
+
+    @Test fun `failed configuration retries after cooldown but not during it`() = runBlocking {
+        MockWebServer().use { server ->
+            var now = 0L
+            server.enqueue(MockResponse().setResponseCode(500))
+            repeat(2) { server.enqueue(MockResponse().setBody("{}")) }
+            val repository = MusicRepository(MusicRepository.createApi(server.url("/").toString()), nowMillis = { now })
+            repository.home()
+            now = 29_999
+            repository.home()
+            assertEquals(3, server.requestCount)
+            server.enqueue(MockResponse().setBody("""{"staticAddr":"https://retry.example/"}"""))
+            server.enqueue(MockResponse().setBody("{}"))
+            now = 30_000
+            repository.home()
+            assertEquals(5, server.requestCount)
+            assertEquals("https://retry.example/", repository.staticAddress)
+        }
+    }
+    @Test fun `all supported preferences are read for every regional request`() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("{}"))
+            var region = "CN"
+            val repository = MusicRepository(MusicRepository.createApi(server.url("/").toString()), preferredRegion = { region })
+            listOf("CN", "HK", "TW").forEach { code ->
+                region = code
+                server.enqueue(MockResponse().setBody("""{"cacheCountryCode":"US","grps":[]}"""))
+                server.enqueue(MockResponse().setBody("""{"musics":[]}"""))
+                repository.home(true)
+                repository.detail(Collection(42, 1, "Playlist"), 0)
+            }
+            server.takeRequest()
+            listOf("CN", "HK", "TW").forEach { code ->
+                assertEquals(code, server.takeRequest().requestUrl!!.queryParameter("cacheCountryCode"))
+                assertEquals(code, server.takeRequest().requestUrl!!.queryParameter("cacheCountryCode"))
+            }
+        }
+    }
+    @Test fun `home and detail default to CN and server country cannot overwrite preference`() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("{}"))
+            server.enqueue(MockResponse().setBody("""{"cacheCountryCode":"US","grps":[]}"""))
+            server.enqueue(MockResponse().setBody("""{"musics":[]}"""))
+            val repository = MusicRepository(MusicRepository.createApi(server.url("/").toString()))
+            repository.home()
+            repository.detail(Collection(42, 1, "Playlist"), 0)
+            server.takeRequest()
+            assertEquals("CN", server.takeRequest().requestUrl!!.queryParameter("cacheCountryCode"))
+            assertEquals("CN", server.takeRequest().requestUrl!!.queryParameter("cacheCountryCode"))
+        }
+    }
     @Test fun `search posts query parameters and carries required headers`() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setBody("""{"staticAddr":"https://cdn.example/"}"""))

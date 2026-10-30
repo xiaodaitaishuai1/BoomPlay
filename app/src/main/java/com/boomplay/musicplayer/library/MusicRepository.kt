@@ -28,19 +28,20 @@ interface BoomplayApi {
 class MusicRepository(
     private val api: BoomplayApi = createApi(),
     private val parser: BoomplayParser = BoomplayParser(),
+    private val preferredRegion: () -> String = { "CN" },
+    private val nowMillis: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
     val staticAddress: String get() = parser.staticAddress
-    private var countryCode = "SG"
     private var configured = false
+    private var retryAt: Long? = null
     private val configurationMutex = Mutex()
 
     private suspend fun configure() {
         configurationMutex.withLock {
-            if (configured) return
-            try { parser.body(api.startup()) }
+            if (configured || retryAt?.let { nowMillis() < it } == true) return
+            try { parser.body(api.startup()); configured = true; retryAt = null }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { /* The documented resource address is the offline default. */ }
-            configured = true
+            catch (_: Exception) { retryAt = nowMillis() + 30_000 }
         }
     }
 
@@ -48,10 +49,8 @@ class MusicRepository(
         configure()
         val response = api.home(mapOf(
             "isDragDown" to refresh.toString(), "colPageSize" to "10",
-            "dataVersion" to "0", "cacheCountryCode" to countryCode,
+            "dataVersion" to "0", "cacheCountryCode" to preferredRegion(),
         ))
-        val body = parser.body(response)
-        countryCode = body.text("cacheCountryCode").ifBlank { countryCode }
         parser.home(response)
     }
 
@@ -73,7 +72,7 @@ class MusicRepository(
         // Artist getMusics contains only detailCol. Its songs have a separate endpoint.
         val response = if (page == 0 || collection.type != 2) api.detail(pageParameters(page) + mapOf(
             "colID" to collection.id.toString(), "itemType" to collection.type.toString(),
-            "cacheColVersionCode" to "0", "cacheCountryCode" to countryCode,
+            "cacheColVersionCode" to "0", "cacheCountryCode" to preferredRegion(),
             "trackPoint" to "", "colGrpID" to collection.groupId.toString(),
         )) else JsonObject()
         val body = parser.body(response)

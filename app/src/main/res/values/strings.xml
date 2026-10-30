@@ -49,8 +49,10 @@
     <string name="operation_failed">Could not save changes. Please try again.</string>
     <string name="search_history">Recent searches</string>
     <string name="clear_history">Clear history</string>
-    <string name="remove_search">Remove search</string>
-    <string name="song_count">%1$d songs</string>
+    <plurals name="song_count">
+        <item quantity="one">%1$d song</item>
+        <item quantity="other">%1$d songs</item>
+    </plurals>
     <string name="song_subtitle">%1$s · %2$s</string>
     <string name="playlist_type">Playlist</string>
     <string name="album_type">Album</string>
@@ -59,4 +61,11 @@
     <string name="library_hint">Keep the music you love close.</string>
     <string name="progress">Playback progress</string>
     <string name="no_song">Choose a song to start listening</string>
+    <!-- Settings -->
+    <string name="settings">Settings</string>
+    <string name="preferred_region">Preferred region</string>
+    <string name="region_cn">Mainland China (CN)</string>
+    <string name="region_hk">Hong Kong (HK)</string>
+    <string name="region_tw">Taiwan (TW)</string>
+    <string name="region_description">Used for music requests. Availability and recommendations may still depend on your network location.</string>
 </resources>

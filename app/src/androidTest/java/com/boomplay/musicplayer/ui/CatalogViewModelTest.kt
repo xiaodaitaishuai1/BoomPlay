@@ -1,6 +1,7 @@
 package com.boomplay.musicplayer.ui
 
 import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.SavedStateHandle
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -128,6 +129,122 @@ class CatalogViewModelTest {
             val repeated = settled()
             assertEquals(20, repeated.tracks.size)
             assertFalse(repeated.more)
+        }
+    }
+
+    @Test fun changingRegionInvalidatesCachedPagesAndCancelsOldRequests() {
+        runBlocking {
+            val calls = AtomicInteger()
+            val api = FakeApi().apply { detailResponse = { parameters -> calls.incrementAndGet(); songs(parameters.getValue("pageIndex").toInt(), "Song") } }
+            createModel(api)
+            onMain { model.open(detailScreen()) }
+            settled()
+            onMain { model.open(Screen("settings")) }
+            settled { it.screen.kind == "settings" }
+            onMain { model.regionChanged() }
+            settled { it.screen.kind == "settings" }
+            onMain { model.open(detailScreen()) }
+            settled { it.screen.kind == "detail" }
+            assertEquals("The old detail must be fetched again after region change", 2, calls.get())
+        }
+    }
+
+    @Test fun changingRegionDuringRequestCancelsTheOldLoadAndRestartsHome() {
+        runBlocking {
+            val started = CompletableDeferred<Unit>()
+            val calls = AtomicInteger()
+            val api = FakeApi().apply { homeResponse = {
+                if (calls.incrementAndGet() == 1) { started.complete(Unit); awaitCancellation() }
+                else json("""{"grps":[]}""")
+            } }
+            createModel(api)
+            onMain { model.load() }
+            withTimeout(5_000) { started.await() }
+            onMain { model.regionChanged() }
+            val result = settled { it.screen.kind == "home" }
+            assertFalse(result.failed)
+            assertEquals(2, calls.get())
+        }
+    }
+
+    @Test fun oldPagesAreEvictedAndNavigationHistoryIsBounded() = runBlocking {
+        val calls = AtomicInteger()
+        val api = FakeApi().apply { detailResponse = { calls.incrementAndGet(); songs(0, "Song") } }
+        createModel(api)
+        repeat(35) { index ->
+            val id = index + 1L
+            onMain { model.open(Screen("detail", "Page $id", id, Collection(id, 1, "Page $id"))) }
+            settled { it.screen.id == id }
+        }
+        assertEquals(30, model.stack.size)
+        onMain { model.open(Screen("detail", "Page 1", 1, Collection(1, 1, "Page 1"))) }
+        settled { it.screen.id == 1L }
+        assertEquals(36, calls.get())
+    }
+
+    @Test fun savedStateRestoresRouteAndScrollWithoutCachingResponses(): Unit = runBlocking {
+        val handle = SavedStateHandle()
+        onMain { model = CatalogViewModel(app, MusicRepository(FakeApi()), library, savedState = handle); store.put("catalog-test", model) }
+        onMain { model.open(detailScreen()) }
+        settled()
+        onMain {
+            model.shelfScrolls["${model.screenKey()}:detail"] = CatalogScroll(2, -9)
+            model.saveScroll(model.screenKey(), CatalogScroll(12, -18))
+        }
+        val restoredHandle = SavedStateHandle(handle.keys().associateWith { handle.get<Any?>(it) })
+        onMain { model = CatalogViewModel(app, MusicRepository(FakeApi()), library, savedState = restoredHandle); store.put("catalog-test", model) }
+        assertEquals("detail", model.state.value.screen.kind)
+        assertEquals(42L, model.state.value.screen.collection?.id)
+        assertTrue(model.state.value.tracks.isEmpty())
+        assertEquals(CatalogScroll(12, -18), model.scrollFor(model.screenKey()))
+        assertEquals(CatalogScroll(2, -9), model.shelfScrolls["${model.screenKey()}:detail"])
+        onMain { model.load() }
+        assertEquals(20, settled().tracks.size)
+        onMain { assertTrue(model.back()) }
+        settled { it.screen.kind == "home" }
+    }
+
+    @Test fun malformedSavedRouteFallsBackToHome() {
+        val handle = SavedStateHandle(mapOf("catalog_route" to android.os.Bundle().apply { putString("kind", "invalid") }))
+        onMain { model = CatalogViewModel(app, MusicRepository(FakeApi()), library, savedState = handle); store.put("catalog-test", model) }
+        assertEquals("home", model.state.value.screen.kind)
+        val wrongType = SavedStateHandle(mapOf("catalog_route" to "broken", "catalog_stack" to "broken", "catalog_scrolls" to "broken"))
+        onMain { model = CatalogViewModel(app, MusicRepository(FakeApi()), library, savedState = wrongType); store.put("catalog-test", model) }
+        assertEquals("home", model.state.value.screen.kind)
+    }
+
+    @Test fun searchDraftBelongsToItsSearchRoute() = runBlocking {
+        val handle = SavedStateHandle()
+        onMain { model = CatalogViewModel(app, MusicRepository(FakeApi()), library, savedState = handle); store.put("catalog-test", model) }
+        onMain { model.open(Screen("search", query = "First")); model.searchDraft = "First draft" }
+        settled { it.screen.query == "First" }
+        onMain { model.open(Screen("search", query = "Second")); model.searchDraft = "Second draft" }
+        settled { it.screen.query == "Second" }
+        onMain { model.back() }
+        settled { it.screen.query == "First" }
+        assertEquals("First draft", model.searchDraft)
+        val restoredHandle = SavedStateHandle(handle.keys().associateWith { handle.get<Any?>(it) })
+        onMain { model = CatalogViewModel(app, MusicRepository(FakeApi()), library, savedState = restoredHandle); store.put("catalog-test", model) }
+        assertEquals("First", model.state.value.screen.query)
+        assertEquals("First draft", model.searchDraft)
+    }
+
+    @Test fun refreshingSectionsPrunesOnlyTheCurrentPagesObsoleteShelves() {
+        val handle = SavedStateHandle()
+        onMain {
+            model = CatalogViewModel(app, MusicRepository(FakeApi()), library, savedState = handle)
+            store.put("catalog-test", model)
+            val page = model.screenKey()
+            model.shelfScrolls["$page:section:old"] = CatalogScroll(3, -5)
+            model.shelfScrolls["$page:section:new"] = CatalogScroll(1, -2)
+            model.shelfScrolls["other:section:keep"] = CatalogScroll(2, -4)
+            model.pruneShelves(page, setOf("$page:section:new"))
+            assertFalse(model.shelfScrolls.containsKey("$page:section:old"))
+            assertEquals(CatalogScroll(1, -2), model.shelfScrolls["$page:section:new"])
+            assertEquals(CatalogScroll(2, -4), model.shelfScrolls["other:section:keep"])
+            val persisted = handle.get<android.os.Bundle>("catalog_shelves")!!
+            assertFalse(persisted.containsKey("$page:section:old"))
+            assertTrue(persisted.containsKey("other:section:keep"))
         }
     }
 

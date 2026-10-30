@@ -16,6 +16,15 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class ResponsiveLayoutTest {
+    @Test fun songCountsUseEnglishSingularAndPlural() {
+        val app = ApplicationProvider.getApplicationContext<BoomPlayApplication>()
+        val config = Configuration(app.resources.configuration).apply { setLocale(java.util.Locale.ENGLISH) }
+        val resources = app.createConfigurationContext(config).resources
+        assertEquals("0 songs", resources.getQuantityString(R.plurals.song_count, 0, 0))
+        assertEquals("1 song", resources.getQuantityString(R.plurals.song_count, 1, 1))
+        assertEquals("2 songs", resources.getQuantityString(R.plurals.song_count, 2, 2))
+    }
+
     @Test fun playerControlsRemainReachableOnSmallAndLandscapeWindows() {
         InstrumentationRegistry.getInstrumentation().runOnMainSync {
             listOf(320 to 568, 568 to 320).forEach { (widthDp, heightDp) ->
@@ -41,13 +50,13 @@ class ResponsiveLayoutTest {
             binding.searchBox.visibility = View.VISIBLE; binding.searchButton.visibility = View.GONE
             binding.libraryTab.visibility = View.GONE; binding.actions.visibility = View.VISIBLE
             binding.miniPlayer.root.visibility = View.VISIBLE
-            binding.miniPlayer.title.text = "A long song name that needs truncation"
+            binding.miniPlayer.miniTitle.text = "A long song name that needs truncation"
             binding.miniPlayer.artist.text = "Artist name"
             measure(binding.root, 320, 568)
             assertTrue(binding.list.height >= px(context, 120))
             assertTrue(binding.miniPlayer.toggle.width >= px(context, 48))
             assertTrue(binding.query.width > px(context, 100))
-            assertTrue(binding.miniPlayer.title.width > 0)
+            assertTrue(binding.miniPlayer.miniTitle.width > 0)
         }
     }
     private fun context(width: Int, height: Int): android.content.Context {

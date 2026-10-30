@@ -23,6 +23,7 @@ Debug APK: `app/build/outputs/apk/debug/app-debug.apk`.
 - Shared mini player and B-style full player with always-visible controls.
 - Room favorites, recent playback, custom playlists and search history.
 - Playback queue and position restore paused after restart.
+- Settings → Preferred region: Mainland China (CN, default), Hong Kong (HK), Taiwan (TW). The selected value is persisted and sent to Home/collection detail; the service may still choose content by IP/session.
 
 `LiveMusicFlowTest` deliberately uses the production backend and CDN; it fails if either is unreachable. Other tests use local fixtures or an isolated database. Live tests save page screenshots under the device's Download folder with `boomplay-` prefixes.
 

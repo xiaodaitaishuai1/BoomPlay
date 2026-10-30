@@ -29,7 +29,10 @@ android {
         }
     }
     buildTypes {
-        getByName("debug") { signingConfig = signingConfigs.getByName("release") }
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("release")
+            if (providers.gradleProperty("boomplayQa").orNull == "true") applicationIdSuffix = ".qa"
+        }
         getByName("release") { signingConfig = signingConfigs.getByName("release") }
     }
     compileOptions {

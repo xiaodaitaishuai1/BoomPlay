@@ -4,7 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
-import android.os.Parcelable
+import android.widget.Toast
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.addCallback
@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
+import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -20,6 +21,8 @@ import com.boomplay.musicplayer.databinding.ActivityMainBinding
 import com.boomplay.musicplayer.library.Collection
 import com.boomplay.musicplayer.library.Track
 import com.boomplay.musicplayer.library.UserPlaylist
+import com.boomplay.musicplayer.library.RegionPreferences
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.boomplay.musicplayer.ui.*
 import com.boomplay.musicplayer.utils.UiUtils
 import kotlinx.coroutines.Job
@@ -39,22 +42,26 @@ class MainActivity : AppCompatActivity() {
     private var localTracks = emptyList<Track>()
     private var localJob: Job? = null
     private var localId: Long? = null
-    private val scrolls get() = model.scrolls
     private var renderedKey = ""
+    private var committedKey = ""
+    private var renderGeneration = 0
+    private var pendingPosition: Pair<String, CatalogScroll>? = null
     private val notification = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater); setContentView(binding.root)
         UiUtils.insets(binding.root)
-        adapter = CatalogAdapter(::openCollection, ::playTrack) { dialogs.trackMenu(it, model.state.value.screen.takeIf { screen -> screen.kind == "playlist" }?.id) }
+        adapter = CatalogAdapter(::openCollection, ::playTrack, { dialogs.trackMenu(it, model.state.value.screen.takeIf { screen -> screen.kind == "playlist" }?.id) }, model.shelfScrolls)
         binding.list.layoutManager = LinearLayoutManager(this)
         binding.list.adapter = adapter
         binding.back.setOnClickListener { goBack() }
         binding.title.setOnClickListener { if (model.state.value.screen.kind == "library") navigate(Screen()) }
         binding.libraryTab.setOnClickListener { navigate(Screen("library", getString(R.string.library))) }
         binding.searchButton.setOnClickListener { navigate(Screen("search", getString(R.string.search))) }
+        binding.settingsButton.setOnClickListener { navigate(Screen("settings", getString(R.string.settings))) }
         binding.clearQuery.setOnClickListener { binding.query.setText(""); search("") }
+        binding.query.doAfterTextChanged { model.searchDraft = it.toString() }
         binding.query.setOnEditorActionListener { _, action, event ->
             if (action == EditorInfo.IME_ACTION_SEARCH || event?.keyCode == android.view.KeyEvent.KEYCODE_ENTER) {
                 search(binding.query.text.toString().trim()); true
@@ -72,6 +79,7 @@ class MainActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this) { if (!goBack()) finish() }
         lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) {
             launch { model.state.collectLatest { render() } }
+            launch { model.settingsErrors.collect { Toast.makeText(this@MainActivity, R.string.operation_failed, Toast.LENGTH_LONG).show() } }
             launch { app.library.favorites.collectLatest { favorites = it; render() } }
             launch { app.library.recent.collectLatest { recent = it; render() } }
             launch { app.library.playlists.collectLatest { playlists = it; render() } }
@@ -79,7 +87,7 @@ class MainActivity : AppCompatActivity() {
             launch { app.playback.state.collectLatest { state ->
                 binding.miniPlayer.root.isVisible = state.current != null
                 state.current?.let {
-                    binding.miniPlayer.title.text = it.title
+                    binding.miniPlayer.miniTitle.text = it.title
                     binding.miniPlayer.artist.text = when { state.error != null -> getString(R.string.playback_error); state.buffering -> getString(R.string.loading); else -> it.artist.name }
                     UiUtils.artwork(binding.miniPlayer.artwork, it.cover)
                 }
@@ -90,24 +98,48 @@ class MainActivity : AppCompatActivity() {
         } }
         model.load()
     }
-    private fun screenKey() = model.state.value.screen.let { "${it.kind}:${it.id}:${it.collection?.id}:${it.query}" }
-    private fun saveScroll() { scrolls[screenKey()] = binding.list.layoutManager?.onSaveInstanceState() }
+    private fun screenKey() = model.screenKey()
+    private fun currentScroll(): CatalogScroll? {
+        val manager = binding.list.layoutManager as LinearLayoutManager
+        val position = manager.findFirstVisibleItemPosition()
+        return position.takeIf { it >= 0 }?.let { CatalogScroll(it, manager.findViewByPosition(it)?.top?.minus(binding.list.paddingTop) ?: 0) }
+    }
+    private fun saveScroll() {
+        adapter.saveShelfPositions()
+        if (committedKey == screenKey()) currentScroll()?.let { model.saveScroll(screenKey(), it) }
+    }
+    override fun onSaveInstanceState(outState: Bundle) { saveScroll(); super.onSaveInstanceState(outState) }
+    override fun onStop() { saveScroll(); super.onStop() }
     private fun navigate(screen: Screen) { saveScroll(); model.open(screen) }
     private fun goBack(): Boolean { saveScroll(); return model.back() }
     private fun search(query: String) {
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(binding.query.windowToken, 0)
         binding.query.clearFocus(); saveScroll()
         model.open(Screen("search", getString(R.string.search), query = query), false)
+        model.searchDraft = query
+        if (binding.query.text.toString() != query) binding.query.setText(query)
     }
     private fun openCollection(collection: Collection) = navigate(Screen("detail", collection.title, collection.id, collection))
+    private fun regionName(code: String) = getString(when (code) { "HK" -> R.string.region_hk; "TW" -> R.string.region_tw; else -> R.string.region_cn })
+    private fun chooseRegion() {
+        val codes = RegionPreferences.CODES
+        MaterialAlertDialogBuilder(this).setTitle(R.string.preferred_region)
+            .setSingleChoiceItems(codes.map(::regionName).toTypedArray(), codes.indexOf(app.regions.countryCode)) { dialog, index ->
+                dialog.dismiss()
+                model.selectRegion(codes[index])
+            }.setNegativeButton(R.string.cancel, null).show()
+    }
     private fun tracks() = when (model.state.value.screen.kind) { "favorites" -> favorites; "recent" -> recent; "playlist" -> localTracks; else -> model.state.value.tracks }
     private fun playTrack(track: Track) {
+        if (committedKey != screenKey()) return
         val queue = tracks()
-        app.playback.play(queue, queue.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
+        val index = queue.indexOfFirst { it.id == track.id }
+        if (index < 0) return
+        app.playback.play(queue, index)
         openPlayer()
     }
     private fun playAll(shuffle: Boolean) {
-        if (tracks().isEmpty()) return
+        if (committedKey != screenKey() || tracks().isEmpty()) return
         app.playback.play(tracks(), 0, shuffle); openPlayer()
     }
     private fun openPlayer() {
@@ -120,16 +152,17 @@ class MainActivity : AppCompatActivity() {
         val top = screen.kind == "home" || screen.kind == "library"
         binding.back.isVisible = !top
         binding.libraryTab.isVisible = top
+        binding.settingsButton.isVisible = top
         binding.title.text = if (top) getString(R.string.home) else if (screen.kind == "playlist") playlists.firstOrNull { it.id == screen.id }?.name ?: screen.title else screen.title
         binding.title.setTextColor(getColor(if (screen.kind == "library") R.color.text_secondary else R.color.text_primary))
         binding.libraryTab.setTextColor(getColor(if (screen.kind == "library") R.color.text_primary else R.color.text_secondary))
         binding.searchBox.isVisible = screen.kind == "search"
-        binding.searchButton.isVisible = screen.kind != "search"
-        if (changed && screen.kind == "search") binding.query.setText(screen.query)
+        binding.searchButton.isVisible = screen.kind != "search" && screen.kind != "settings"
+        if (changed && screen.kind == "search") binding.query.setText(model.searchDraft)
         val songPage = screen.kind in listOf("detail", "favorites", "recent", "playlist") || screen.kind == "search" && screen.query.isNotBlank()
         binding.actions.isVisible = songPage
         binding.collectionMore.isVisible = screen.kind == "playlist"
-        binding.playAll.isEnabled = tracks().isNotEmpty(); binding.shuffle.isEnabled = tracks().isNotEmpty()
+        binding.playAll.isEnabled = committedKey == key && tracks().isNotEmpty(); binding.shuffle.isEnabled = binding.playAll.isEnabled
         binding.refresh.isEnabled = screen.kind in listOf("home", "more", "detail") || screen.kind == "search" && screen.query.isNotBlank()
         binding.refresh.isRefreshing = state.loading
         binding.footer.isVisible = state.failed || state.more
@@ -144,41 +177,60 @@ class MainActivity : AppCompatActivity() {
             "home" -> {
                 rows += CatalogRow.Heading(getString(R.string.browse_music))
                 state.sections.forEach { section ->
-                    if (section.layout != 1) rows += CatalogRow.Heading(section.title) { navigate(Screen("more", section.title, section.id)) }
-                    rows += CatalogRow.Shelf(section.items, section.layout == 1)
+                    if (section.layout != 1) rows += CatalogRow.Heading(section.title, id = "section:${section.id}") { navigate(Screen("more", section.title, section.id)) }
+                    rows += CatalogRow.Shelf(section.items, section.layout == 1, id = "$key:section:${section.id}")
                 }
             }
             "library" -> {
                 rows += CatalogRow.Heading(getString(R.string.library_hint))
-                rows += CatalogRow.Entry(getString(R.string.favorites), getString(R.string.song_count, favorites.size), icon = R.drawable.ic_player_heart, action = { navigate(Screen("favorites", getString(R.string.favorites))) })
-                rows += CatalogRow.Entry(getString(R.string.recently_played), getString(R.string.song_count, recent.size), action = { navigate(Screen("recent", getString(R.string.recently_played))) })
-                rows += CatalogRow.Entry(getString(R.string.new_playlist), icon = R.drawable.ic_add, action = { dialogs.create() })
+                rows += CatalogRow.Entry(getString(R.string.favorites), resources.getQuantityString(R.plurals.song_count, favorites.size, favorites.size), icon = R.drawable.ic_player_heart, action = { navigate(Screen("favorites", getString(R.string.favorites))) }, id = "library:favorites")
+                rows += CatalogRow.Entry(getString(R.string.recently_played), resources.getQuantityString(R.plurals.song_count, recent.size, recent.size), action = { navigate(Screen("recent", getString(R.string.recently_played))) }, id = "library:recent")
+                rows += CatalogRow.Entry(getString(R.string.new_playlist), icon = R.drawable.ic_add, action = { dialogs.create() }, id = "library:create")
                 rows += CatalogRow.Heading(getString(R.string.playlists))
-                playlists.forEach { playlist -> rows += CatalogRow.Entry(playlist.name, getString(R.string.song_count, playlist.count), playlist.cover,
-                    action = { navigate(Screen("playlist", playlist.name, playlist.id)) }, more = { dialogs.playlistMenu(playlist.id, playlist.name) }) }
+                playlists.forEach { playlist -> rows += CatalogRow.Entry(playlist.name, resources.getQuantityString(R.plurals.song_count, playlist.count, playlist.count), playlist.cover,
+                    action = { navigate(Screen("playlist", playlist.name, playlist.id)) }, more = { dialogs.playlistMenu(playlist.id, playlist.name) }, id = "playlist:${playlist.id}") }
             }
-            "more" -> state.collections.forEach { item -> rows += CatalogRow.Entry(item.title, getString(when (item.type) { 2 -> R.string.artist_type; 5 -> R.string.album_type; else -> R.string.playlist_type }), item.cover, action = { openCollection(item) }) }
+            "settings" -> {
+                rows += CatalogRow.Entry(getString(R.string.preferred_region), regionName(app.regions.countryCode), icon = R.drawable.ic_settings, action = ::chooseRegion, id = "settings:region")
+                rows += CatalogRow.Note(getString(R.string.region_description))
+            }
+            "more" -> state.collections.forEach { item -> rows += CatalogRow.Entry(item.title, getString(when (item.type) { 2 -> R.string.artist_type; 5 -> R.string.album_type; else -> R.string.playlist_type }), item.cover, action = { openCollection(item) }, id = "collection:${item.type}:${item.id}") }
             "search" -> if (screen.query.isBlank()) {
                 rows += CatalogRow.Heading(getString(R.string.search_history))
-                if (searches.isNotEmpty()) rows += CatalogRow.Entry(getString(R.string.clear_history), action = { dialogs.perform { app.library.clearSearches() } })
-                searches.forEach { query -> rows += CatalogRow.Entry(query, icon = R.drawable.ic_home_search, action = { search(query) }, more = { dialogs.perform { app.library.removeSearch(query) } }) }
+                if (searches.isNotEmpty()) rows += CatalogRow.Entry(getString(R.string.clear_history), action = { dialogs.perform { app.library.clearSearches() } }, id = "search:clear")
+                searches.forEach { query -> rows += CatalogRow.Entry(query, icon = R.drawable.ic_home_search, action = { search(query) }, more = { dialogs.perform { app.library.removeSearch(query) } }, id = "search:query:$query") }
             } else rows += state.tracks.map { CatalogRow.Song(it) }
             "detail" -> {
                 screen.collection?.let { item ->
-                    rows += CatalogRow.Shelf(listOf(item), true)
-                    if (item.description.isNotBlank()) rows += CatalogRow.Entry(item.description, action = {})
+                    rows += CatalogRow.Shelf(listOf(item), true, id = "$key:detail")
+                    if (item.description.isNotBlank()) rows += CatalogRow.Entry(item.description, action = {}, id = "detail:description")
                 }
                 rows += state.tracks.map { CatalogRow.Song(it) }
             }
             else -> rows += tracks().map { CatalogRow.Song(it) }
         }
-        if (state.failed) rows += CatalogRow.Entry(getString(R.string.network_error), action = { model.load() })
-        val empty = when (screen.kind) { "home" -> state.sections.isEmpty(); "library" -> false; "more" -> state.collections.isEmpty(); "search" -> screen.query.isNotBlank() && state.tracks.isEmpty(); else -> tracks().isEmpty() }
+        if (state.failed) rows += CatalogRow.Entry(getString(R.string.network_error), action = { model.load() }, id = "status:network-error")
+        val empty = when (screen.kind) { "home" -> state.sections.isEmpty(); "library", "settings" -> false; "more" -> state.collections.isEmpty(); "search" -> screen.query.isNotBlank() && state.tracks.isEmpty(); else -> tracks().isEmpty() }
         if (empty && !state.loading && !state.failed) rows += CatalogRow.Heading(getString(R.string.empty))
-        val position = if (!changed) binding.list.layoutManager?.onSaveInstanceState() else scrolls[key]
-        adapter.submit(rows)
-        if (position != null) binding.list.layoutManager?.onRestoreInstanceState(position)
-        else if (changed) binding.list.scrollToPosition(0)
+        if (changed) pendingPosition = key to (model.scrollFor(key) ?: CatalogScroll())
+        // RecyclerView preserves its own anchor during same-page updates. Only restore
+        // an explicit navigation target, otherwise an async diff can rewind a fling.
+        val position = pendingPosition?.takeIf { it.first == key }?.second
+        val stamp = ++renderGeneration
         renderedKey = key
+        binding.list.isVisible = committedKey == key
+        adapter.submit(rows) {
+            if (stamp == renderGeneration && screenKey() == key) {
+                committedKey = key
+                binding.list.isVisible = true
+                if (state.initialized && !state.loading) model.pruneShelves(key, rows.filterIsInstance<CatalogRow.Shelf>().map { it.id }.toSet())
+                binding.playAll.isEnabled = tracks().isNotEmpty(); binding.shuffle.isEnabled = binding.playAll.isEnabled
+                if (position != null && rows.isNotEmpty() && (!state.loading || state.initialized)) {
+                    val bounded = position.position.coerceAtMost(rows.lastIndex)
+                    (binding.list.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(bounded, if (bounded == position.position) position.offset else 0)
+                    pendingPosition = null
+                }
+            }
+        }
     }
 }

@@ -10,35 +10,30 @@ import com.boomplay.musicplayer.library.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /** All transport commands go through the service's MediaSession. */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class PlaybackController(context: Context) {
     private val appContext = context.applicationContext
-    private val mutableState = MutableStateFlow(PlaybackState())
-    val state: StateFlow<PlaybackState> = mutableState.asStateFlow()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val publisher = PlaybackStatePublisher(scope)
+    val state: StateFlow<PlaybackState> = publisher.state
     private var player: MediaController? = null
     private val pending = ArrayDeque<(MediaController) -> Unit>()
     private var connecting = false
     private val listener = object : Player.Listener {
-        override fun onEvents(player: Player, events: Player.Events) = publish()
+        override fun onEvents(player: Player, events: Player.Events) {
+            publisher.publish(
+                rebuildQueue = events.contains(Player.EVENT_TIMELINE_CHANGED),
+                refreshCurrent = events.contains(Player.EVENT_MEDIA_METADATA_CHANGED),
+            )
+        }
     }
 
     init {
         connect()
-        scope.launch {
-            while (isActive) {
-                publish()
-                delay(500)
-            }
-        }
     }
 
     private fun connect() {
@@ -50,7 +45,7 @@ class PlaybackController(context: Context) {
                 override fun onDisconnected(controller: MediaController) {
                     if (player === controller) {
                         player = null
-                        mutableState.value = mutableState.value.copy(playing = false, buffering = false, error = "connection_failed")
+                        publisher.detach()
                     }
                 }
             }).buildAsync()
@@ -59,11 +54,12 @@ class PlaybackController(context: Context) {
             runCatching { future.get() }.onSuccess { controller ->
                 player = controller
                 controller.addListener(listener)
+                publisher.attach(controller)
                 while (pending.isNotEmpty()) pending.removeFirst()(controller)
                 publish()
             }.onFailure {
                 pending.clear()
-                mutableState.value = mutableState.value.copy(buffering = false, error = "connection_failed")
+                publisher.detach()
             }
         }, ContextCompat.getMainExecutor(appContext))
     }
@@ -141,20 +137,6 @@ class PlaybackController(context: Context) {
     }
 
     private fun publish() {
-        val controller = player ?: return
-        val queue = (0 until controller.mediaItemCount).mapNotNull { PlaybackMediaItems.track(controller.getMediaItemAt(it)) }
-        val track = PlaybackMediaItems.track(controller.currentMediaItem)
-        mutableState.value = PlaybackState(
-            current = track,
-            queue = queue,
-            index = controller.currentMediaItemIndex.takeIf { track != null } ?: -1,
-            playing = controller.isPlaying,
-            buffering = controller.playbackState == Player.STATE_BUFFERING,
-            positionMs = controller.currentPosition.coerceAtLeast(0),
-            durationMs = controller.duration.takeIf { it > 0 } ?: track?.durationMs ?: 0,
-            shuffle = controller.shuffleModeEnabled,
-            repeatMode = controller.repeatMode,
-            error = controller.playerError?.let { "playback_failed" },
-        )
+        publisher.publish()
     }
 }

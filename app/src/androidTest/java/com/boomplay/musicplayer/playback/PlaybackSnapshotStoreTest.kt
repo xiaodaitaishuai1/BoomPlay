@@ -32,6 +32,21 @@ class PlaybackSnapshotStoreTest {
         assertEquals(expected, PlaybackSnapshotStore(context).load())
     }
 
+    @Test fun oldServiceCannotOverwriteNewServiceSnapshot() {
+        val newerStore = PlaybackSnapshotStore(context)
+        val latest = PlaybackSnapshot(listOf(Track(2, "New service")), positionMs = 5_000)
+        newerStore.save(latest)
+        store.save(PlaybackSnapshot(listOf(Track(1, "Old service"))))
+        assertEquals(latest, newerStore.load())
+    }
+
+    @Test fun creatingNewStoreDoesNotDiscardOldServicesFinalSave() {
+        val newerStore = PlaybackSnapshotStore(context)
+        val final = PlaybackSnapshot(listOf(Track(1, "Final")), positionMs = 42_000)
+        store.save(final)
+        assertEquals(final, newerStore.load())
+    }
+
     @Test fun emptyAndInvalidQueuesAreNotRestored() {
         store.save(PlaybackSnapshot())
         assertNull(store.load())
@@ -45,6 +60,9 @@ class PlaybackSnapshotStoreTest {
         assertNull(store.load())
         context.getSharedPreferences("playback_snapshot", Context.MODE_PRIVATE)
             .edit().putString("snapshot", "{\"queue\":[null],\"index\":0,\"positionMs\":0}").commit()
+        assertNull(store.load())
+        context.getSharedPreferences("playback_snapshot", Context.MODE_PRIVATE)
+            .edit().putString("snapshot", "{\"queue\":[{\"id\":1,\"title\":\"x\"}],\"index\":0,\"positionMs\":0}").commit()
         assertNull(store.load())
     }
 }

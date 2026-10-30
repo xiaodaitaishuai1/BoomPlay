@@ -3,6 +3,9 @@ package com.boomplay.musicplayer.playback
 import com.boomplay.musicplayer.library.Track
 
 object PlaybackUtils {
+    internal fun acceptsController(appPackage: String, controllerPackage: String, trusted: Boolean): Boolean =
+        appPackage == controllerPackage || trusted
+
     fun audioUrl(track: Track, staticAddress: String): String? {
         val source = sequenceOf(track.hdSource, track.mdSource, track.ldSource)
             .map(String::trim).firstOrNull { it.isNotEmpty() } ?: return null
