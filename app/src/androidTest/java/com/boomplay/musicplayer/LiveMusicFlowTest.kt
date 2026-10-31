@@ -52,7 +52,9 @@ class LiveMusicFlowTest {
             capture("player")
             onView(withId(R.id.favorite)).perform(click())
             onView(withId(R.id.queue)).perform(click())
-            onView(withText(R.string.cancel)).perform(click())
+            androidx.test.espresso.Espresso.pressBack()
+            // Material's predictive-back dismissal keeps the sheet window until its animation ends.
+            Thread.sleep(500)
             val firstId = app.playback.state.value.current!!.id
             onView(withId(R.id.next)).perform(click())
             waitUntil { app.playback.state.value.current?.id != firstId && app.playback.state.value.playing }

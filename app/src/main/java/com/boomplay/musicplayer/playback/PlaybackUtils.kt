@@ -7,13 +7,19 @@ object PlaybackUtils {
         appPackage == controllerPackage || trusted
 
     fun audioUrl(track: Track, staticAddress: String): String? {
-        val source = sequenceOf(track.hdSource, track.mdSource, track.ldSource)
-            .map(String::trim).firstOrNull { it.isNotEmpty() } ?: return null
-        return if (source.startsWith("https://", ignoreCase = true) || source.startsWith("http://", ignoreCase = true)) {
-            source
-        } else {
-            staticAddress.trimEnd('/') + "/" + source.trimStart('/')
+        return audioUrls(track, staticAddress, AudioQuality.HIGH).firstOrNull()
+    }
+
+    fun audioUrls(track: Track, staticAddress: String, quality: AudioQuality): List<String> {
+        val sources = when (quality) {
+            AudioQuality.MEDIUM -> listOf(track.mdSource, track.ldSource, track.hdSource)
+            AudioQuality.LOW -> listOf(track.ldSource, track.mdSource, track.hdSource)
+            else -> listOf(track.hdSource, track.mdSource, track.ldSource)
         }
+        return sources.map(String::trim).filter(String::isNotEmpty).map { source ->
+            if (source.startsWith("https://", true) || source.startsWith("http://", true)) source
+            else staticAddress.trimEnd('/') + "/" + source.trimStart('/')
+        }.distinct()
     }
 
     fun clampPosition(position: Long, duration: Long): Long =

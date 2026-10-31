@@ -26,7 +26,6 @@
     <string name="repeat_one">Repeat one</string>
     <string name="repeat_all">Repeat all</string>
     <string name="queue">Play queue</string>
-    <string name="now_playing">NOW PLAYING</string>
     <string name="favorites">Favorites</string>
     <string name="recently_played">Recently played</string>
     <string name="new_playlist">New playlist</string>
@@ -68,4 +67,38 @@
     <string name="region_hk">Hong Kong (HK)</string>
     <string name="region_tw">Taiwan (TW)</string>
     <string name="region_description">Used for music requests. Availability and recommendations may still depend on your network location.</string>
+    <!-- Listening and queue -->
+    <string name="queue_empty">Your queue is empty</string>
+    <string name="clear_queue">Clear queue</string>
+    <string name="clear_queue_message">Stop playback and remove all songs from the queue?</string>
+    <string name="save_queue">Save as playlist</string>
+    <string name="remove_queue_item">Remove from queue</string>
+    <string name="drag_queue_item">Drag to reorder</string>
+    <string name="queue_playing_title">Playing · %1$s</string>
+    <string name="queue_saved">Queue saved</string>
+    <string name="queue_move_up">Move up</string>
+    <string name="queue_move_down">Move down</string>
+    <string name="lyrics">Lyrics</string>
+    <string name="artwork">Artwork</string>
+    <string name="no_lyrics">No lyrics</string>
+    <string name="lyrics_loading">Loading lyrics…</string>
+    <string name="lyrics_follow">Follow playback</string>
+    <string name="sleep_timer">Sleep timer</string>
+    <string name="timer_off">Off</string>
+    <string name="timer_end_of_track">End of current song</string>
+    <string name="timer_custom">Custom minutes</string>
+    <plurals name="timer_minutes">
+        <item quantity="one">%1$d minute</item>
+        <item quantity="other">%1$d minutes</item>
+    </plurals>
+    <string name="timer_remaining">Stops in %1$s</string>
+    <string name="timer_invalid">Enter 1 to 1440 minutes</string>
+    <string name="audio_quality">Audio quality</string>
+    <string name="quality_auto">Automatic</string>
+    <string name="quality_high">High</string>
+    <string name="quality_medium">Medium</string>
+    <string name="quality_low">Low</string>
+    <string name="quality_next_track">Applies to the next song or retry</string>
+    <string name="listening_tools">Listening options</string>
+    <string name="song_actions">Song actions</string>
 </resources>

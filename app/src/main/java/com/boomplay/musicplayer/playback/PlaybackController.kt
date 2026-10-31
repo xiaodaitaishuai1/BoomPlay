@@ -2,15 +2,19 @@ package com.boomplay.musicplayer.playback
 
 import android.content.ComponentName
 import android.content.Context
+import android.os.Bundle
 import androidx.core.content.ContextCompat
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import androidx.media3.session.SessionCommand
 import com.boomplay.musicplayer.library.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /** All transport commands go through the service's MediaSession. */
@@ -20,6 +24,8 @@ class PlaybackController(context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val publisher = PlaybackStatePublisher(scope)
     val state: StateFlow<PlaybackState> = publisher.state
+    private val mutableQueueRevision = MutableStateFlow(0L)
+    internal val queueRevision: StateFlow<Long> = mutableQueueRevision.asStateFlow()
     private var player: MediaController? = null
     private val pending = ArrayDeque<(MediaController) -> Unit>()
     private var connecting = false
@@ -29,6 +35,7 @@ class PlaybackController(context: Context) {
                 rebuildQueue = events.contains(Player.EVENT_TIMELINE_CHANGED),
                 refreshCurrent = events.contains(Player.EVENT_MEDIA_METADATA_CHANGED),
             )
+            if (events.contains(Player.EVENT_TIMELINE_CHANGED)) mutableQueueRevision.value++
         }
     }
 
@@ -46,6 +53,7 @@ class PlaybackController(context: Context) {
                     if (player === controller) {
                         player = null
                         publisher.detach()
+                        mutableQueueRevision.value++
                     }
                 }
             }).buildAsync()
@@ -55,6 +63,7 @@ class PlaybackController(context: Context) {
                 player = controller
                 controller.addListener(listener)
                 publisher.attach(controller)
+                mutableQueueRevision.value++
                 while (pending.isNotEmpty()) pending.removeFirst()(controller)
                 publish()
             }.onFailure {
@@ -119,12 +128,55 @@ class PlaybackController(context: Context) {
         }
     }
 
+    fun removeQueueItem(index: Int) = command {
+        if (index in 0 until it.mediaItemCount) {
+            if (it.mediaItemCount == 1) { it.pause(); it.clearMediaItems() }
+            else it.removeMediaItem(index)
+        }
+    }
+
+    fun moveQueueItem(from: Int, to: Int) = command {
+        if (from in 0 until it.mediaItemCount && to in 0 until it.mediaItemCount) it.moveMediaItem(from, to)
+    }
+
+    fun clearQueue() = command { it.pause(); it.clearMediaItems() }
+
+    suspend fun saveQueueAsPlaylist(name: String): Long {
+        val snapshot = state.value.queue.toList()
+        return (appContext as com.boomplay.musicplayer.BoomPlayApplication).library.saveQueueAsPlaylist(name, snapshot)
+    }
+
+    internal fun queueEntries(): List<Pair<String, Track>> = player?.let { controller ->
+        (0 until controller.mediaItemCount).mapNotNull { index ->
+            val item = controller.getMediaItemAt(index)
+            PlaybackMediaItems.track(item)?.let { PlaybackMediaItems.occurrenceId(item) to it }
+        }
+    }.orEmpty()
+
+    internal fun queueIndex(occurrenceId: String): Int = player?.let { controller ->
+        (0 until controller.mediaItemCount).firstOrNull {
+            PlaybackMediaItems.occurrenceId(controller.getMediaItemAt(it)) == occurrenceId
+        }
+    } ?: -1
+
     fun enqueue(track: Track, next: Boolean = false) = command {
         val position = PlaybackUtils.insertionIndex(it.mediaItemCount, it.currentMediaItemIndex, next)
         it.addMediaItem(position, PlaybackMediaItems.fromTrack(track))
     }
 
-    fun retry() = command { it.prepare(); it.play() }
+    fun retry() = command { it.sendCustomCommand(SessionCommand(ListeningCommands.RETRY, Bundle.EMPTY), Bundle.EMPTY) }
+
+    fun setSleepTimer(minutes: Int) {
+        require(minutes in 1..1440)
+        timerCommand(minutes)
+    }
+    fun stopAfterCurrentTrack() = timerCommand(ListeningCommands.END_OF_TRACK)
+    fun cancelSleepTimer() = timerCommand(ListeningCommands.OFF)
+    private fun timerCommand(minutes: Int) = command {
+        it.sendCustomCommand(SessionCommand(ListeningCommands.TIMER, Bundle.EMPTY), Bundle().apply {
+            putInt(ListeningCommands.MINUTES, minutes)
+        })
+    }
 
     private fun command(block: (MediaController) -> Unit) {
         scope.launch {

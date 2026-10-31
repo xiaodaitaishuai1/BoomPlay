@@ -23,10 +23,14 @@ Debug APK: `app/build/outputs/apk/debug/app-debug.apk`.
 - Shared mini player and B-style full player with always-visible controls.
 - Room favorites, recent playback, custom playlists and search history.
 - Playback queue and position restore paused after restart.
+- Editable queue with drag sorting, removal, clearing and atomic save as playlist (saved playlists deduplicate songs).
+- Artwork/lyrics switch with official Boomplay lyrics lookup, timed highlighting and tap-to-seek; unavailable lyrics never block playback.
+- Listening options in the player menu: 15/30/60-minute or custom sleep timer, end-of-song stop, automatic or manual source quality.
+- Bounded audio-source recovery without automatically skipping failed songs. Quality changes apply to the next source selection or manual retry.
 - Settings → Preferred region: Mainland China (CN, default), Hong Kong (HK), Taiwan (TW). The selected value is persisted and sent to Home/collection detail; the service may still choose content by IP/session.
 
 `LiveMusicFlowTest` deliberately uses the production backend and CDN; it fails if either is unreachable. Other tests use local fixtures or an isolated database. Live tests save page screenshots under the device's Download folder with `boomplay-` prefixes.
 
-API and audio requests use the documented User-Agent. The app does not bypass regional or account restrictions. It has no login, ads, telemetry, downloads, video or lyrics integration. API reference and local verification evidence remain in the untracked `docs/` folder.
+API and audio requests use the documented User-Agent. The app does not bypass regional or account restrictions. It has no login, ads, telemetry, downloads or video integration. Lyrics use the official read-only lookup and source CDN; missing or failed responses show “No lyrics”. No third-party lyrics provider is used. API reference and local verification evidence remain in the untracked `docs/` folder.
 
 The small vector control icons were adapted from the user-provided Audiory project; the app mark, repeat and chevron vectors are local geometry. Confirm asset rights before distributing a release.

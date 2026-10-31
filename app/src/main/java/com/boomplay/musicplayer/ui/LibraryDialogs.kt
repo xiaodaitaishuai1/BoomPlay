@@ -56,9 +56,6 @@ class LibraryDialogs(private val activity: AppCompatActivity) {
         MaterialAlertDialogBuilder(activity).setTitle(track.title).setItems(actions.map { activity.getString(it.first) }.toTypedArray()) { _, index -> actions[index].second() }.show()
     }
     fun queue() {
-        val state = app.playback.state.value
-        MaterialAlertDialogBuilder(activity).setTitle(R.string.queue)
-            .setSingleChoiceItems(state.queue.map { it.title }.toTypedArray(), state.index) { dialog, index -> app.playback.playIndex(index); dialog.dismiss() }
-            .setNegativeButton(R.string.cancel, null).show()
+        QueueSheet(activity, this).show()
     }
 }

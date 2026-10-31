@@ -50,6 +50,32 @@ class LibraryRepositoryTest {
         assertTrue(library.playlistTracks(id).first().isEmpty())
     }
 
+    @Test fun savingQueueDeduplicatesWithoutChangingQueue() = runBlocking {
+        val queue = listOf(song, song.copy(id = 2), song)
+        val id = library.saveQueueAsPlaylist("  Queue  ", queue)
+        assertEquals(listOf(1L, 2L), library.playlistTracks(id).first().map { it.id })
+        assertEquals("Queue", library.playlists.first().single().name)
+        assertEquals(3, queue.size)
+    }
+
+    @Test fun invalidQueueNameDoesNotCreatePlaylist() = runBlocking {
+        assertTrue(runCatching { library.saveQueueAsPlaylist(" ", listOf(song)) }.isFailure)
+        assertTrue(library.playlists.first().isEmpty())
+    }
+
+    @Test fun failedBatchRollsBackPlaylistAndTrackWrites() = runBlocking {
+        val broken = object : AbstractList<Track>() {
+            override val size = 2
+            override fun get(index: Int): Track {
+                if (index == 0) return song
+                error("Interrupted queue snapshot")
+            }
+        }
+        assertTrue(runCatching { library.saveQueueAsPlaylist("Failed", broken) }.isFailure)
+        assertTrue(library.playlists.first().isEmpty())
+        assertNull(database.dao().track(song.id))
+    }
+
     @Test fun historyAndSearchesDeduplicate() = runBlocking {
         library.recordPlayed(song)
         library.recordPlayed(song.copy(id = 2))

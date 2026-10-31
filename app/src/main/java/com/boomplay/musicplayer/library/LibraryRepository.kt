@@ -46,6 +46,17 @@ class LibraryRepository internal constructor(private val database: LibraryDataba
             dao.add(PlaylistTrackEntity(id, track.id, dao.nextPosition(id)))
         }
     }
+    suspend fun saveQueueAsPlaylist(name: String, tracks: List<Track>): Long = withContext(Dispatchers.IO) {
+        val clean = validName(name)
+        database.withTransaction {
+            val id = dao.create(PlaylistEntity(name = clean))
+            tracks.asSequence().filter { it.id > 0 }.distinctBy { it.id }.forEachIndexed { index, track ->
+                saveTrack(track)
+                dao.add(PlaylistTrackEntity(id, track.id, index.toLong()))
+            }
+            id
+        }
+    }
     suspend fun removeFromPlaylist(id: Long, trackId: Long) = withContext(Dispatchers.IO) { dao.remove(id, trackId) }
     suspend fun rememberSearch(query: String) = withContext(Dispatchers.IO) {
         val term = query.trim()
